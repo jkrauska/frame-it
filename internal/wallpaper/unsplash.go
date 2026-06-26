@@ -81,14 +81,69 @@ func fetchUnsplash(ctx context.Context, opts Options) (Image, error) {
 		DownloadURL: downloadURL,
 		FileType:    "image/jpeg",
 		Credit:      credit,
+		Description: unsplashDescription(photo),
 	}, nil
 }
 
+func unsplashDescription(photo unsplashPhoto) string {
+	if d := strings.TrimSpace(photo.AltDescription); d != "" {
+		return d
+	}
+	if d := strings.TrimSpace(photo.Description); isUsefulCaption(d) {
+		return d
+	}
+	return ""
+}
+
+func isUsefulCaption(text string) bool {
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+
+	blocked := []string{
+		"youtube",
+		"subscribe",
+		"subscribing",
+		"subscription",
+		"follow me",
+		"follow my",
+		"instagram",
+		"patreon",
+		"please consider",
+		"check out my",
+		"visit my",
+		"link in bio",
+		"support me",
+		"donate",
+		"paypal",
+		"buy my",
+		"hire me",
+		"book me",
+		"my website",
+		"my portfolio",
+	}
+	for _, phrase := range blocked {
+		if strings.Contains(lower, phrase) {
+			return false
+		}
+	}
+
+	if strings.Contains(lower, "my photos") &&
+		(strings.Contains(lower, "useful") || strings.Contains(lower, "consider")) {
+		return false
+	}
+
+	return true
+}
+
 type unsplashPhoto struct {
-	ID     string `json:"id"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-	URLs   struct {
+	ID             string `json:"id"`
+	Width          int    `json:"width"`
+	Height         int    `json:"height"`
+	Description    string `json:"description"`
+	AltDescription string `json:"alt_description"`
+	URLs           struct {
 		Raw  string `json:"raw"`
 		Full string `json:"full"`
 	} `json:"urls"`

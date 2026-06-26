@@ -3,6 +3,7 @@ package wallpaper
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -52,6 +53,23 @@ func ParseSource(s string) (Source, error) {
 	default:
 		return "", fmt.Errorf("unknown source %q", s)
 	}
+}
+
+// DefaultSource picks a wallpaper provider when --source is omitted.
+// Unsplash is preferred when UNSPLASH_ACCESS_KEY is set; otherwise Wallhaven.
+func DefaultSource() Source {
+	if strings.TrimSpace(os.Getenv("UNSPLASH_ACCESS_KEY")) != "" {
+		return SourceUnsplash
+	}
+	return SourceWallhaven
+}
+
+// ResolveSource returns the provider from an explicit --source flag, or DefaultSource when empty.
+func ResolveSource(explicit string) (Source, error) {
+	if strings.TrimSpace(explicit) == "" {
+		return DefaultSource(), nil
+	}
+	return ParseSource(explicit)
 }
 
 func (s Source) String() string {

@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+const maxCaptionRunes = 80
 
 // Image is a wallpaper from any supported source.
 type Image struct {
@@ -20,6 +23,41 @@ type Image struct {
 	DownloadURL string
 	FileType    string
 	Credit      string
+	Description string
+}
+
+// Caption returns bottom-left overlay text: "description · author".
+func (img Image) Caption() string {
+	desc := strings.TrimSpace(img.Description)
+	author := authorName(img.Credit)
+	return formatCaption(desc, author)
+}
+
+func authorName(credit string) string {
+	credit = strings.TrimSpace(credit)
+	if credit == "" {
+		return ""
+	}
+	if i := strings.Index(credit, " ("); i > 0 {
+		return strings.TrimSpace(credit[:i])
+	}
+	return credit
+}
+
+func formatCaption(description, author string) string {
+	if utf8.RuneCountInString(description) > maxCaptionRunes {
+		description = "..."
+	}
+	switch {
+	case description != "" && author != "":
+		return description + " · " + author
+	case description != "":
+		return description
+	case author != "":
+		return author
+	default:
+		return ""
+	}
 }
 
 var httpClient = &http.Client{Timeout: 60 * time.Second}

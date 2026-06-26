@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jkrauska/frame-it/internal/config"
 	"github.com/jkrauska/frame-it/internal/discover"
+	"github.com/jkrauska/frame-it/internal/overlay"
 	"github.com/jkrauska/frame-it/internal/samsung"
 	"github.com/jkrauska/frame-it/internal/userlog"
 	"github.com/jkrauska/frame-it/internal/wallpaper"
@@ -35,12 +37,14 @@ Options:
   --no-matte         Upload without a matte frame (same as --matte none)
   --show             After upload, display the image (default: true)
   --no-show          Upload without switching the displayed image
+  --no-date          Skip date stamp on uploaded images
   --mdns-only        Discover using mDNS only (no SSDP)
   --ssdp-only        Discover using SSDP only (no mDNS)
   -v                 Verbose logging
 
 Wallpaper options (wallpaper command):
   --source NAME      wallhaven (default), unsplash, or pixabay
+                     (defaults to unsplash when $UNSPLASH_ACCESS_KEY is set)
   --api-key KEY      API key for the selected source (see env vars below)
   --id ID            Use a specific wallpaper/photo ID
   --sort MODE        wallhaven: random (default), toplist, …; pixabay: popular, latest
@@ -74,6 +78,8 @@ Examples:
   frame-it schedule --interval 15m --start 7:00 --end 21:00 nature
 `
 
+var errHelp = errors.New("help requested")
+
 func main() {
 	os.Exit(run())
 }
@@ -92,6 +98,10 @@ func run() int {
 
 	flags, args, err := parseFlags(os.Args[2:])
 	if err != nil {
+		if errors.Is(err, errHelp) {
+			fmt.Print(usage)
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
@@ -142,7 +152,7 @@ func run() int {
 			log.Error("Upload needs at least one image path")
 			return 1
 		}
-		return uploadImages(ctx, client, args, flags.show, log)
+		return uploadImages(ctx, client, args, flags.show, flags.stampDate, log)
 
 	case "list":
 		if err := client.Connect(ctx); err != nil {
@@ -209,11 +219,11 @@ func run() int {
 	}
 }
 
-func uploadImages(ctx context.Context, client *samsung.Client, paths []string, show bool, log *userlog.Logger) int {
-	return uploadImagesWithReplace(ctx, client, paths, show, log, "", false)
+func uploadImages(ctx context.Context, client *samsung.Client, paths []string, show, stampDate bool, log *userlog.Logger) int {
+	return uploadImagesWithReplace(ctx, client, paths, show, stampDate, "", log, "", false)
 }
 
-func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths []string, show bool, log *userlog.Logger, tokenDir string, replacePrevious bool) int {
+func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths []string, show, stampDate bool, caption string, log *userlog.Logger, tokenDir string, replacePrevious bool) int {
 	if err := client.Connect(ctx); err != nil {
 		log.Error(fmt.Sprintf("Could not connect: %v", err))
 		return 1
@@ -250,8 +260,27 @@ func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths 
 		if wallpaperSlot != 0 {
 			uploadLabel = config.WallpaperSlotLabel(wallpaperSlot)
 		}
+
+		if stampDate {
+			log.Step("Preparing 4K image with date stamp…")
+		} else if strings.TrimSpace(caption) != "" {
+			log.Step("Preparing 4K image with caption…")
+		} else {
+			log.Step("Preparing 4K image…")
+		}
+		uploadPath, cleanup, err := overlay.PrepareUploadPath(path, overlay.PrepareOptions{
+			StampDate: stampDate,
+			When:      time.Now(),
+			Caption:   caption,
+		})
+		if err != nil {
+			log.Error(fmt.Sprintf("Could not prepare image %s: %v", path, err))
+			return 1
+		}
+
 		log.Step(fmt.Sprintf("Uploading to %s…", uploadLabel))
-		contentID, err := client.Upload(ctx, path)
+		contentID, err := client.Upload(ctx, uploadPath)
+		cleanup()
 		if err != nil {
 			log.Error(fmt.Sprintf("Upload failed: %v", err))
 			return 1
@@ -299,6 +328,7 @@ type cliFlags struct {
 	name           string
 	matte          string
 	show           bool
+	stampDate      bool
 	verbose        bool
 	mdnsOnly       bool
 	ssdpOnly       bool
@@ -325,8 +355,9 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 		tokenDir:      defaultTokenDir(),
 		name:          "frame-it",
 		matte:         "none",
-		show:          true,
-		wallhavenKey:  os.Getenv("WALLHAVEN_API_KEY"),
+		show:             true,
+		stampDate:        true,
+		wallhavenKey:     os.Getenv("WALLHAVEN_API_KEY"),
 		unsplashKey:   os.Getenv("UNSPLASH_ACCESS_KEY"),
 		pixabayKey:    os.Getenv("PIXABAY_API_KEY"),
 		wallpaperSort:      "random",
@@ -371,6 +402,8 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.show = true
 		case "--no-show":
 			f.show = false
+		case "--no-date":
+			f.stampDate = false
 		case "-v", "--verbose":
 			f.verbose = true
 		case "--mdns-only":
@@ -439,6 +472,8 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.scheduleOnce = true
 		case "--no-run-on-start":
 			f.scheduleRunOnStart = false
+		case "-h", "--help":
+			return f, nil, errHelp
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return f, nil, fmt.Errorf("unknown flag: %s", arg)
@@ -558,7 +593,7 @@ func runDiscover(ctx context.Context, flags cliFlags, log *userlog.Logger) int {
 func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userlog.Logger) int {
 	query := strings.TrimSpace(strings.Join(args, " "))
 
-	source, err := wallpaper.ParseSource(flags.wallpaperSource)
+	source, err := wallpaper.ResolveSource(flags.wallpaperSource)
 	if err != nil {
 		log.Error(err.Error())
 		return 1
@@ -581,6 +616,9 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 	}
 
 	note := fmt.Sprintf("Selected %s · %s", img.ID, img.Resolution)
+	if img.Description != "" {
+		note += " · " + img.Description
+	}
 	if img.Credit != "" {
 		note += " · " + img.Credit
 	}
@@ -628,7 +666,7 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 		Logger:        log.Slog(),
 	})
 
-	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, log, flags.tokenDir, flags.wallpaperReplace)
+	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.stampDate, img.Caption(), log, flags.tokenDir, flags.wallpaperReplace)
 }
 
 func wallpaperOptions(flags cliFlags, source wallpaper.Source, query string) wallpaper.Options {
