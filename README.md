@@ -108,7 +108,7 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 | `--sort` | `random` | Wallhaven: `random`, `toplist`, `date_added`, `views`, `favorites`; Unsplash: `random` or `search`; Pixabay: `popular` (default) or `latest` |
 | `--save` | | Save the downloaded image locally |
 | `--download-only` | | Download only; do not upload to the TV |
-| `--no-replace` | | Keep previous wallpaper uploads (default replaces the last one) |
+| `--no-replace` | | Keep previous wallpaper uploads (default: rotate two slots and replace the inactive one) |
 
 | Source | API key env var | Notes |
 |--------|-----------------|-------|
@@ -117,6 +117,8 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 | [Pixabay](https://pixabay.com/api/docs/) | `$PIXABAY_API_KEY` | Nature category; min 3840×2160 filter |
 
 All sources target 4K landscape images suitable for Frame TVs. Unsplash and Pixabay default to a `nature` query when none is given. Pixabay may return `imageURL` (full resolution) when your account has full API access; otherwise it falls back to the best available CDN size.
+
+Wallpaper mode keeps two logical slots (`frame-it-image1` and `frame-it-image2`) and alternates between them. The TV assigns a new content ID (e.g. `MY_F0139`) on every upload — that counter always increments — but only two wallpaper images are kept on the TV at a time.
 
 ## Environment
 
@@ -133,7 +135,7 @@ frame-it stores state in `--token-dir` (default `~/.frame-it`):
 
 | File | Purpose |
 |------|---------|
-| `config.json` | Saved TV IP (`host`) and last wallpaper content ID (`last_wallpaper_id`) |
+| `config.json` | Saved TV IP (`host`), wallpaper double-buffer slots (`wallpaper_slot1`, `wallpaper_slot2`, `wallpaper_active_slot`), and active content ID (`last_wallpaper_id`) |
 | `tv_<IP>.txt` | Authorization token for that TV (dots in the IP become underscores) |
 
 Run `pair` once per TV. After pairing, `upload`, `list`, and other commands reuse the saved token.
@@ -167,7 +169,7 @@ Samsung does not document this API. Behavior varies by model year and firmware.
 ## Troubleshooting
 
 - **Authorization prompt every time** — Run `pair` and accept the prompt; token is saved in `--token-dir`.
-- **TV storage filling up** — Each `upload` adds images permanently. `wallpaper` replaces the previous upload by default (tracked in `config.json`). Use `--no-replace` to keep a collection, or `frame-it list` / `frame-it delete` to clean up manually.
+- **TV storage filling up** — Each `upload` adds images permanently. `wallpaper` keeps two slots on the TV and replaces the inactive one each run (so the current image stays visible during the swap). Use `--no-replace` to keep a growing collection, or `frame-it list` / `frame-it delete` to clean up manually.
 - **Connection refused** — TV must be on and on the same subnet (WebSockets do not cross VLANs).
 - **Upload fails on older TVs** — API 0.97 (2018–2019) uses a different binary upload path; frame-it detects this automatically.
 - **Images look wrong** — Resize to 3840×2160 before upload; the TV expects 4K landscape frames.

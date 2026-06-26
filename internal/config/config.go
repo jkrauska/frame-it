@@ -13,8 +13,78 @@ const File = "config.json"
 
 // Config holds saved frame-it settings.
 type Config struct {
-	Host             string `json:"host,omitempty"`
-	LastWallpaperID  string `json:"last_wallpaper_id,omitempty"`
+	Host              string `json:"host,omitempty"`
+	LastWallpaperID   string `json:"last_wallpaper_id,omitempty"` // active slot; kept for compatibility
+	WallpaperSlot1    string `json:"wallpaper_slot1,omitempty"`
+	WallpaperSlot2    string `json:"wallpaper_slot2,omitempty"`
+	WallpaperActive   int    `json:"wallpaper_active_slot,omitempty"` // 1 or 2
+}
+
+// Wallpaper slot labels stored in config (logical names; TV assigns its own content IDs).
+const (
+	WallpaperSlot1Name = "frame-it-image1"
+	WallpaperSlot2Name = "frame-it-image2"
+)
+
+// WallpaperSlotLabel returns the logical slot name.
+func WallpaperSlotLabel(slot int) string {
+	switch slot {
+	case 1:
+		return WallpaperSlot1Name
+	case 2:
+		return WallpaperSlot2Name
+	default:
+		return fmt.Sprintf("frame-it-image%d", slot)
+	}
+}
+
+// WallpaperSlots is the double-buffer state used for wallpaper replacement.
+type WallpaperSlots struct {
+	Slot1  string
+	Slot2  string
+	Active int // 1, 2, or 0 when unset
+}
+
+// WallpaperSlots returns slot state, migrating legacy last_wallpaper_id when needed.
+func (c Config) WallpaperSlots() WallpaperSlots {
+	slots := WallpaperSlots{
+		Slot1:  c.WallpaperSlot1,
+		Slot2:  c.WallpaperSlot2,
+		Active: c.WallpaperActive,
+	}
+	if slots.Active == 0 && c.LastWallpaperID != "" {
+		slots.Slot1 = c.LastWallpaperID
+		slots.Active = 1
+	}
+	return slots
+}
+
+// NextWallpaperTarget picks the slot to write next and any prior content ID to remove after the swap.
+func NextWallpaperTarget(slots WallpaperSlots) (targetSlot int, replaceID string) {
+	switch slots.Active {
+	case 1:
+		return 2, slots.Slot2
+	case 2:
+		return 1, slots.Slot1
+	default:
+		return 1, ""
+	}
+}
+
+// LoadWallpaperSlots reads slot state and persists legacy last_wallpaper_id into slot 1 when needed.
+func LoadWallpaperSlots(tokenDir string) (WallpaperSlots, error) {
+	cfg, err := Load(tokenDir)
+	if err != nil {
+		return WallpaperSlots{}, err
+	}
+	if cfg.WallpaperActive == 0 && cfg.LastWallpaperID != "" && cfg.WallpaperSlot1 == "" {
+		cfg.WallpaperSlot1 = cfg.LastWallpaperID
+		cfg.WallpaperActive = 1
+		if err := Save(tokenDir, cfg); err != nil {
+			return WallpaperSlots{}, err
+		}
+	}
+	return cfg.WallpaperSlots(), nil
 }
 
 // Path returns the config file path for the given token directory.
@@ -75,6 +145,25 @@ func SetLastWallpaperID(tokenDir, contentID string) error {
 	if err != nil {
 		return err
 	}
+	cfg.LastWallpaperID = contentID
+	return Save(tokenDir, cfg)
+}
+
+// SetWallpaperSlot saves a slot's content ID and marks it active.
+func SetWallpaperSlot(tokenDir string, slot int, contentID string) error {
+	cfg, err := Load(tokenDir)
+	if err != nil {
+		return err
+	}
+	switch slot {
+	case 1:
+		cfg.WallpaperSlot1 = contentID
+	case 2:
+		cfg.WallpaperSlot2 = contentID
+	default:
+		return fmt.Errorf("invalid wallpaper slot %d", slot)
+	}
+	cfg.WallpaperActive = slot
 	cfg.LastWallpaperID = contentID
 	return Save(tokenDir, cfg)
 }

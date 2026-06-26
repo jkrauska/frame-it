@@ -45,7 +45,7 @@ Wallpaper options (wallpaper command):
   --sort MODE        wallhaven: random (default), toplist, …; pixabay: popular, latest
   --save PATH        Also save the downloaded image locally
   --download-only    Download only; do not upload to the TV
-  --no-replace       Keep previous wallpaper uploads (default: replace last upload)
+  --no-replace       Keep previous wallpaper uploads (default: rotate two slots)
 
 Environment:
   WALLHAVEN_API_KEY     Wallhaven key (optional for SFW)
@@ -205,18 +205,17 @@ func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths 
 	}
 	defer func() { _ = client.Close() }()
 
+	var wallpaperSlot int
+	var replaceID string
 	if replacePrevious && tokenDir != "" {
-		cfg, err := config.Load(tokenDir)
+		slots, err := config.LoadWallpaperSlots(tokenDir)
 		if err != nil {
 			log.Error(fmt.Sprintf("Could not load config: %v", err))
 			return 1
 		}
-		if cfg.LastWallpaperID != "" {
-			log.Step(fmt.Sprintf("Removing previous wallpaper %s…", cfg.LastWallpaperID))
-			if err := client.DeleteImages(ctx, []string{cfg.LastWallpaperID}); err != nil {
-				log.Warn(fmt.Sprintf("Could not delete previous wallpaper: %v", err))
-			}
-		}
+		targetSlot, oldID := config.NextWallpaperTarget(slots)
+		wallpaperSlot = targetSlot
+		replaceID = oldID
 	}
 
 	var lastID string
@@ -232,13 +231,21 @@ func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths 
 			continue
 		}
 
-		log.Step(fmt.Sprintf("Uploading %s…", filepath.Base(path)))
+		uploadLabel := filepath.Base(path)
+		if wallpaperSlot != 0 {
+			uploadLabel = config.WallpaperSlotLabel(wallpaperSlot)
+		}
+		log.Step(fmt.Sprintf("Uploading to %s…", uploadLabel))
 		contentID, err := client.Upload(ctx, path)
 		if err != nil {
 			log.Error(fmt.Sprintf("Upload failed: %v", err))
 			return 1
 		}
-		log.Note(fmt.Sprintf("Saved on TV as %s", contentID))
+		if wallpaperSlot != 0 {
+			log.Note(fmt.Sprintf("TV assigned %s to %s", contentID, config.WallpaperSlotLabel(wallpaperSlot)))
+		} else {
+			log.Note(fmt.Sprintf("Saved on TV as %s", contentID))
+		}
 		lastID = contentID
 	}
 
@@ -247,12 +254,24 @@ func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths 
 			log.Error(fmt.Sprintf("Could not show image: %v", err))
 			return 1
 		}
-		log.Step("Now showing on the TV")
+		if wallpaperSlot != 0 {
+			log.Step(fmt.Sprintf("Now showing %s on the TV", config.WallpaperSlotLabel(wallpaperSlot)))
+		} else {
+			log.Step("Now showing on the TV")
+		}
 	}
 
-	if replacePrevious && tokenDir != "" && lastID != "" {
-		if err := config.SetLastWallpaperID(tokenDir, lastID); err != nil {
-			log.Warn(fmt.Sprintf("Could not save wallpaper ID to config: %v", err))
+	if replaceID != "" {
+		slotLabel := config.WallpaperSlotLabel(wallpaperSlot)
+		log.Step(fmt.Sprintf("Removing replaced %s image %s…", slotLabel, replaceID))
+		if err := client.DeleteImages(ctx, []string{replaceID}); err != nil {
+			log.Warn(fmt.Sprintf("Could not delete replaced wallpaper: %v", err))
+		}
+	}
+
+	if replacePrevious && tokenDir != "" && lastID != "" && wallpaperSlot != 0 {
+		if err := config.SetWallpaperSlot(tokenDir, wallpaperSlot, lastID); err != nil {
+			log.Warn(fmt.Sprintf("Could not save wallpaper slot to config: %v", err))
 		}
 	}
 
