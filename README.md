@@ -104,7 +104,7 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source` | `wallhaven` | `wallhaven`, `unsplash`, or `pixabay` |
+| `--source` | `wallhaven`, or `unsplash` when `$UNSPLASH_ACCESS_KEY` is set | `wallhaven`, `unsplash`, or `pixabay` |
 | `--api-key` | | Override API key for the selected source |
 | `--id` | | Use a specific wallpaper/photo ID |
 | `--sort` | `random` | Wallhaven: `random`, `toplist`, `date_added`, `views`, `favorites`; Unsplash: `random` or `search`; Pixabay: `popular` (default) or `latest` |

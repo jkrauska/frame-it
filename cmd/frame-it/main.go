@@ -44,6 +44,7 @@ Options:
 
 Wallpaper options (wallpaper command):
   --source NAME      wallhaven (default), unsplash, or pixabay
+                     (defaults to unsplash when $UNSPLASH_ACCESS_KEY is set)
   --api-key KEY      API key for the selected source (see env vars below)
   --id ID            Use a specific wallpaper/photo ID
   --sort MODE        wallhaven: random (default), toplist, …; pixabay: popular, latest
@@ -592,7 +593,7 @@ func runDiscover(ctx context.Context, flags cliFlags, log *userlog.Logger) int {
 func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userlog.Logger) int {
 	query := strings.TrimSpace(strings.Join(args, " "))
 
-	source, err := wallpaper.ParseSource(flags.wallpaperSource)
+	source, err := wallpaper.ResolveSource(flags.wallpaperSource)
 	if err != nil {
 		log.Error(err.Error())
 		return 1
