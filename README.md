@@ -122,7 +122,7 @@ All sources target 4K landscape images suitable for Frame TVs. Unsplash and Pixa
 
 Wallpaper mode keeps two logical slots (`frame-it-image1` and `frame-it-image2`) and alternates between them. The TV assigns a new content ID (e.g. `MY_F0139`) on every upload — that counter always increments — but only two wallpaper images are kept on the TV at a time.
 
-All uploaded images are resized to 3840×2160 (center-cropped cover). By default a small date stamp is added in the bottom-right corner (e.g. `Friday, June 26th`), white on dark backgrounds and dark grey on light ones. Pass `--no-date` to skip the stamp while still resizing.
+All uploaded images are resized to 3840×2160 (center-cropped cover). By default a small date stamp is added in the bottom-right corner (e.g. `Friday, June 26th`), white on dark backgrounds and dark grey on light ones. Pass `--no-date` to skip the stamp while still resizing. Unsplash wallpapers show the photo description and photographer in the bottom-left (e.g. `green grass field during sunset · Robert Lukeman`); long descriptions collapse to `...` but keep the credit.
 
 ### Scheduled refresh
 

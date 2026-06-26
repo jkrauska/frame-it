@@ -84,7 +84,7 @@ func TestPrepareUploadPathResizesWithoutDate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.jpg")
 	writeTestJPEG(t, path, color.RGBA{R: 20, G: 20, B: 20, A: 255})
 
-	uploadPath, cleanup, err := PrepareUploadPath(path, false, time.Time{}, nil)
+	uploadPath, cleanup, err := PrepareUploadPath(path, PrepareOptions{})
 	if err != nil {
 		t.Fatalf("PrepareUploadPath: %v", err)
 	}
@@ -106,6 +106,46 @@ func TestPrepareUploadPathResizesWithoutDate(t *testing.T) {
 	}
 	if cfg.Width != targetWidth || cfg.Height != targetHeight {
 		t.Fatalf("size = %dx%d, want %dx%d", cfg.Width, cfg.Height, targetWidth, targetHeight)
+	}
+}
+
+func TestNormalizeCaption(t *testing.T) {
+	t.Parallel()
+
+	short := "Mountain lake at sunrise · Jane Doe"
+	if got := normalizeCaption(short); got != short {
+		t.Fatalf("normalizeCaption(short) = %q, want %q", got, short)
+	}
+
+	long := "It was a cloudy day and I was on my couch, bored because I was doing nothing, so at 4pm I decided to go to Lake Carezza. The weather was not good, but according to the forecast it would be better for the sunset. It was worth it. · Robert Lukeman"
+	if got := normalizeCaption(long); got != "... · Robert Lukeman" {
+		t.Fatalf("normalizeCaption(long) = %q, want %q", got, "... · Robert Lukeman")
+	}
+
+	if got := normalizeCaption("   "); got != "" {
+		t.Fatalf("normalizeCaption(blank) = %q, want empty", got)
+	}
+}
+
+func TestPrepareUploadPathCaptionWithoutDate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.jpg")
+	writeTestJPEG(t, path, color.RGBA{R: 20, G: 20, B: 20, A: 255})
+
+	uploadPath, cleanup, err := PrepareUploadPath(path, PrepareOptions{
+		StampDate: false,
+		Caption:   "Mountain lake at sunrise · Jane Doe",
+	})
+	if err != nil {
+		t.Fatalf("PrepareUploadPath: %v", err)
+	}
+	defer cleanup()
+
+	info, err := os.Stat(uploadPath)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("processed file is empty")
 	}
 }
 
