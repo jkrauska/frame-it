@@ -25,6 +25,7 @@ Usage:
   frame-it select <content-id>     Display an existing image
   frame-it delete <content-id>...  Delete image(s) from the TV
   frame-it wallpaper [query]       Fetch wallpaper art and upload to TV
+  frame-it schedule [query]        Refresh wallpaper on a daily interval (7am–9pm default)
 
 Options:
   --host IP          TV IP (optional: saved config, FRAME_IT_HOST, or auto-discover)
@@ -47,6 +48,14 @@ Wallpaper options (wallpaper command):
   --download-only    Download only; do not upload to the TV
   --no-replace       Keep previous wallpaper uploads (default: rotate two slots)
 
+Schedule options (schedule command):
+  --interval DUR     Time between refreshes (default: 15m)
+  --start TIME       Daily start time (default: 7:00)
+  --end TIME         Daily end time, exclusive (default: 21:00)
+  --timezone NAME    IANA timezone (default: local)
+  --once             Run one refresh if inside the window, then exit
+  --no-run-on-start  Wait for the first interval before refreshing
+
 Environment:
   WALLHAVEN_API_KEY     Wallhaven key (optional for SFW)
   UNSPLASH_ACCESS_KEY   Unsplash access key (required for --source unsplash)
@@ -61,6 +70,8 @@ Examples:
   frame-it wallpaper --source unsplash mountains
   frame-it wallpaper --source pixabay --download-only --save ./art.jpg
   frame-it wallpaper --source wallhaven --id 94x38z
+  frame-it schedule mountains
+  frame-it schedule --interval 15m --start 7:00 --end 21:00 nature
 `
 
 func main() {
@@ -95,6 +106,10 @@ func run() int {
 
 	if cmd == "wallpaper" {
 		return runWallpaper(ctx, flags, args, log)
+	}
+
+	if cmd == "schedule" {
+		return runSchedule(ctx, flags, args, log)
 	}
 
 	host, err := resolveHost(ctx, flags, log)
@@ -297,6 +312,12 @@ type cliFlags struct {
 	wallpaperSave   string
 	downloadOnly    bool
 	wallpaperReplace bool
+	scheduleInterval string
+	scheduleStart    string
+	scheduleEnd      string
+	scheduleTZ       string
+	scheduleOnce     bool
+	scheduleRunOnStart bool
 }
 
 func parseFlags(args []string) (cliFlags, []string, error) {
@@ -308,8 +329,12 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 		wallhavenKey:  os.Getenv("WALLHAVEN_API_KEY"),
 		unsplashKey:   os.Getenv("UNSPLASH_ACCESS_KEY"),
 		pixabayKey:    os.Getenv("PIXABAY_API_KEY"),
-		wallpaperSort:    "random",
-		wallpaperReplace: true,
+		wallpaperSort:      "random",
+		wallpaperReplace:   true,
+		scheduleInterval:   "15m",
+		scheduleStart:      "7:00",
+		scheduleEnd:        "21:00",
+		scheduleRunOnStart: true,
 	}
 
 	var positional []string
@@ -386,6 +411,34 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.downloadOnly = true
 		case "--no-replace":
 			f.wallpaperReplace = false
+		case "--interval":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--interval requires a value")
+			}
+			i++
+			f.scheduleInterval = args[i]
+		case "--start":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--start requires a value")
+			}
+			i++
+			f.scheduleStart = args[i]
+		case "--end":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--end requires a value")
+			}
+			i++
+			f.scheduleEnd = args[i]
+		case "--timezone":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--timezone requires a value")
+			}
+			i++
+			f.scheduleTZ = args[i]
+		case "--once":
+			f.scheduleOnce = true
+		case "--no-run-on-start":
+			f.scheduleRunOnStart = false
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return f, nil, fmt.Errorf("unknown flag: %s", arg)

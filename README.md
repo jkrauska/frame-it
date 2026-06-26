@@ -79,6 +79,7 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 | `pair` | Save an auth token (accept TV prompt) |
 | `upload <files...>` | Upload JPG/PNG and display the last one |
 | `wallpaper [query]` | Fetch 4K wallpaper art and upload to TV |
+| `schedule [query]` | Refresh wallpaper every 15m between 7am and 9pm (hold overnight) |
 | `list` | List uploaded images on the TV |
 | `select <content-id>` | Show an existing image |
 | `delete <content-id...>` | Remove images from the TV |
@@ -119,6 +120,46 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 All sources target 4K landscape images suitable for Frame TVs. Unsplash and Pixabay default to a `nature` query when none is given. Pixabay may return `imageURL` (full resolution) when your account has full API access; otherwise it falls back to the best available CDN size.
 
 Wallpaper mode keeps two logical slots (`frame-it-image1` and `frame-it-image2`) and alternates between them. The TV assigns a new content ID (e.g. `MY_F0139`) on every upload — that counter always increments — but only two wallpaper images are kept on the TV at a time.
+
+### Scheduled refresh
+
+Run a long-lived scheduler that refreshes wallpaper every 15 minutes from 7:00 to 21:00 and holds the last image overnight:
+
+```bash
+frame-it schedule mountains
+frame-it schedule --interval 15m --start 7:00 --end 21:00 --source unsplash nature
+```
+
+Press Ctrl+C to stop. All `wallpaper` flags (`--source`, `--matte`, etc.) work with `schedule`.
+
+**macOS (launchd)** — save as `~/Library/LaunchAgents/com.frame-it.schedule.plist` and run `launchctl load` on it:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.frame-it.schedule</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/frame-it</string>
+    <string>schedule</string>
+    <string>mountains</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/frame-it-schedule.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/frame-it-schedule.log</string>
+</dict>
+</plist>
+```
+
+Adjust the `frame-it` path and query as needed. For cron-style one-shot runs use `frame-it schedule --once mountains`.
 
 ## Environment
 
