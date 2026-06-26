@@ -95,6 +95,7 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 | `--no-matte` | | Same as `--matte none` |
 | `--show` | `true` | After upload, switch the TV to the new image |
 | `--no-show` | | Upload without switching display |
+| `--no-date` | | Skip bottom-right date stamp (default: on) |
 | `--mdns-only` | | Discover via mDNS only |
 | `--ssdp-only` | | Discover via SSDP only |
 | `-v` | | Verbose debug logging |
@@ -120,6 +121,8 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 All sources target 4K landscape images suitable for Frame TVs. Unsplash and Pixabay default to a `nature` query when none is given. Pixabay may return `imageURL` (full resolution) when your account has full API access; otherwise it falls back to the best available CDN size.
 
 Wallpaper mode keeps two logical slots (`frame-it-image1` and `frame-it-image2`) and alternates between them. The TV assigns a new content ID (e.g. `MY_F0139`) on every upload — that counter always increments — but only two wallpaper images are kept on the TV at a time.
+
+All uploaded images are resized to 3840×2160 (center-cropped cover). By default a small date stamp is added in the bottom-right corner (e.g. `Friday, June 26th`), white on dark backgrounds and dark grey on light ones. Pass `--no-date` to skip the stamp while still resizing.
 
 ### Scheduled refresh
 
