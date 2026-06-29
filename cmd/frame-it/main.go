@@ -49,7 +49,8 @@ Options:
 
 Wallpaper options (wallpaper command):
   --source NAME      wallhaven (default), unsplash, or pixabay
-                     (defaults to unsplash when $UNSPLASH_ACCESS_KEY is set)
+                     (defaults to unsplash when an Unsplash key is set, via
+                     $UNSPLASH_ACCESS_KEY or 'config set unsplash-key')
   --api-key KEY      API key for the selected source (see env vars below)
   --id ID            Use a specific wallpaper/photo ID
   --sort MODE        wallhaven: random (default), toplist, …; pixabay: popular, latest
@@ -699,7 +700,7 @@ func runDiscover(ctx context.Context, flags cliFlags, log *userlog.Logger) int {
 func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userlog.Logger) int {
 	query := strings.TrimSpace(strings.Join(args, " "))
 
-	source, err := wallpaper.ResolveSource(flags.wallpaperSource)
+	source, err := wallpaper.ResolveSource(flags.wallpaperSource, hasUnsplashKey(flags))
 	if err != nil {
 		log.Error(err.Error())
 		return 1
@@ -810,6 +811,18 @@ func wallpaperOptions(flags cliFlags, source wallpaper.Source, query string) wal
 		}
 	}
 	return opts
+}
+
+// hasUnsplashKey reports whether an Unsplash key is available from the flag/env
+// value or saved config, used to pick the default wallpaper source.
+func hasUnsplashKey(flags cliFlags) bool {
+	if strings.TrimSpace(flags.unsplashKey) != "" {
+		return true
+	}
+	if cfg, err := config.Load(flags.tokenDir); err == nil {
+		return strings.TrimSpace(cfg.UnsplashKey) != ""
+	}
+	return false
 }
 
 // archiveDownload copies the freshly downloaded (pre-resize, pre-overlay) image

@@ -56,18 +56,20 @@ func ParseSource(s string) (Source, error) {
 }
 
 // DefaultSource picks a wallpaper provider when --source is omitted.
-// Unsplash is preferred when UNSPLASH_ACCESS_KEY is set; otherwise Wallhaven.
-func DefaultSource() Source {
-	if strings.TrimSpace(os.Getenv("UNSPLASH_ACCESS_KEY")) != "" {
+// Unsplash is preferred when an Unsplash key is available (from UNSPLASH_ACCESS_KEY
+// or saved config, signalled by hasUnsplashKey); otherwise Wallhaven.
+func DefaultSource(hasUnsplashKey bool) Source {
+	if hasUnsplashKey || strings.TrimSpace(os.Getenv("UNSPLASH_ACCESS_KEY")) != "" {
 		return SourceUnsplash
 	}
 	return SourceWallhaven
 }
 
-// ResolveSource returns the provider from an explicit --source flag, or DefaultSource when empty.
-func ResolveSource(explicit string) (Source, error) {
+// ResolveSource returns the provider from an explicit --source flag, or DefaultSource
+// when empty. hasUnsplashKey reports whether an Unsplash key is configured.
+func ResolveSource(explicit string, hasUnsplashKey bool) (Source, error) {
 	if strings.TrimSpace(explicit) == "" {
-		return DefaultSource(), nil
+		return DefaultSource(hasUnsplashKey), nil
 	}
 	return ParseSource(explicit)
 }
