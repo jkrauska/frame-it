@@ -100,18 +100,22 @@ func Download(ctx context.Context, img Image, destPath string) error {
 	return nil
 }
 
-// TempFile creates a temp file with an extension derived from the image metadata.
-func TempFile(img Image) (*os.File, error) {
-	ext := ".jpg"
+// Ext returns the file extension (".jpg" or ".png") derived from the image metadata.
+func (img Image) Ext() string {
 	switch {
 	case strings.Contains(img.FileType, "png"):
-		ext = ".png"
+		return ".png"
 	case strings.Contains(img.FileType, "jpeg"), strings.Contains(img.FileType, "jpg"):
-		ext = ".jpg"
+		return ".jpg"
 	default:
 		if strings.HasSuffix(strings.ToLower(img.DownloadURL), ".png") {
-			ext = ".png"
+			return ".png"
 		}
+		return ".jpg"
 	}
-	return os.CreateTemp("", "frame-it-"+img.Source+"-*"+ext)
+}
+
+// TempFile creates a temp file with an extension derived from the image metadata.
+func TempFile(img Image) (*os.File, error) {
+	return os.CreateTemp("", "frame-it-"+img.Source+"-*"+img.Ext())
 }
