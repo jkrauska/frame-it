@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // File is the config filename inside the token directory.
@@ -18,6 +20,16 @@ type Config struct {
 	WallpaperSlot1    string `json:"wallpaper_slot1,omitempty"`
 	WallpaperSlot2    string `json:"wallpaper_slot2,omitempty"`
 	WallpaperActive   int    `json:"wallpaper_active_slot,omitempty"` // 1 or 2
+
+	// API keys for wallpaper sources. Used when no flag/env value is set.
+	WallhavenKey string `json:"wallhaven_key,omitempty"`
+	UnsplashKey  string `json:"unsplash_key,omitempty"`
+	PixabayKey   string `json:"pixabay_key,omitempty"`
+
+	// ImagesDir overrides where pure downloaded images are archived.
+	// KeepImages overrides how many archived images to retain (0 disables archiving).
+	ImagesDir  string `json:"images_dir,omitempty"`
+	KeepImages *int   `json:"keep_images,omitempty"`
 }
 
 // Wallpaper slot labels stored in config (logical names; TV assigns its own content IDs).
@@ -147,6 +159,108 @@ func SetLastWallpaperID(tokenDir, contentID string) error {
 	}
 	cfg.LastWallpaperID = contentID
 	return Save(tokenDir, cfg)
+}
+
+// SettableKeys are the keys accepted by Set/Get, in display order.
+var SettableKeys = []string{
+	"host",
+	"wallhaven-key",
+	"unsplash-key",
+	"pixabay-key",
+	"images-dir",
+	"keep-images",
+}
+
+// Set updates a single config field by key and saves it. An empty value clears
+// the field. The keep-images value must parse as a non-negative integer.
+func Set(tokenDir, key, value string) error {
+	cfg, err := Load(tokenDir)
+	if err != nil {
+		return err
+	}
+	switch key {
+	case "host":
+		cfg.Host = value
+	case "wallhaven-key":
+		cfg.WallhavenKey = value
+	case "unsplash-key":
+		cfg.UnsplashKey = value
+	case "pixabay-key":
+		cfg.PixabayKey = value
+	case "images-dir":
+		cfg.ImagesDir = value
+	case "keep-images":
+		if value == "" {
+			cfg.KeepImages = nil
+			break
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return fmt.Errorf("keep-images must be a non-negative integer, got %q", value)
+		}
+		cfg.KeepImages = &n
+	default:
+		return fmt.Errorf("unknown config key %q (valid: %s)", key, strings.Join(SettableKeys, ", "))
+	}
+	return Save(tokenDir, cfg)
+}
+
+// Get returns the string form of a single config field by key.
+func Get(tokenDir, key string) (string, error) {
+	cfg, err := Load(tokenDir)
+	if err != nil {
+		return "", err
+	}
+	switch key {
+	case "host":
+		return cfg.Host, nil
+	case "wallhaven-key":
+		return cfg.WallhavenKey, nil
+	case "unsplash-key":
+		return cfg.UnsplashKey, nil
+	case "pixabay-key":
+		return cfg.PixabayKey, nil
+	case "images-dir":
+		return cfg.ImagesDir, nil
+	case "keep-images":
+		if cfg.KeepImages == nil {
+			return "", nil
+		}
+		return strconv.Itoa(*cfg.KeepImages), nil
+	default:
+		return "", fmt.Errorf("unknown config key %q (valid: %s)", key, strings.Join(SettableKeys, ", "))
+	}
+}
+
+// Display returns key/value pairs for all settable keys, masking secret values.
+func (c Config) Display() []KeyValue {
+	mask := func(s string) string {
+		if s == "" {
+			return ""
+		}
+		if len(s) <= 4 {
+			return "****"
+		}
+		return "****" + s[len(s)-4:]
+	}
+	keep := ""
+	if c.KeepImages != nil {
+		keep = strconv.Itoa(*c.KeepImages)
+	}
+	return []KeyValue{
+		{"host", c.Host},
+		{"wallhaven-key", mask(c.WallhavenKey)},
+		{"unsplash-key", mask(c.UnsplashKey)},
+		{"pixabay-key", mask(c.PixabayKey)},
+		{"images-dir", c.ImagesDir},
+		{"keep-images", keep},
+	}
+}
+
+// KeyValue is a single displayed config entry.
+type KeyValue struct {
+	Key   string
+	Value string
 }
 
 // SetWallpaperSlot saves a slot's content ID and marks it active.

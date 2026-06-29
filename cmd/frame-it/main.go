@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jkrauska/frame-it/internal/archive"
 	"github.com/jkrauska/frame-it/internal/config"
 	"github.com/jkrauska/frame-it/internal/discover"
 	"github.com/jkrauska/frame-it/internal/overlay"
@@ -28,6 +30,7 @@ Usage:
   frame-it delete <content-id>...  Delete image(s) from the TV
   frame-it wallpaper [query]       Fetch wallpaper art and upload to TV
   frame-it schedule [query]        Refresh wallpaper on a daily interval (7am–9pm default)
+  frame-it config <list|get|set>   View or change saved settings (host, API keys, …)
 
 Options:
   --host IP          TV IP (optional: saved config, FRAME_IT_HOST, or auto-discover)
@@ -46,13 +49,17 @@ Options:
 
 Wallpaper options (wallpaper command):
   --source NAME      wallhaven (default), unsplash, or pixabay
-                     (defaults to unsplash when $UNSPLASH_ACCESS_KEY is set)
+                     (defaults to unsplash when an Unsplash key is set, via
+                     $UNSPLASH_ACCESS_KEY or 'config set unsplash-key')
   --api-key KEY      API key for the selected source (see env vars below)
   --id ID            Use a specific wallpaper/photo ID
   --sort MODE        wallhaven: random (default), toplist, …; pixabay: popular, latest
   --save PATH        Also save the downloaded image locally
   --download-only    Download only; do not upload to the TV
   --no-replace       Keep previous wallpaper uploads (default: rotate two slots)
+  --images-dir PATH  Archive original downloads here (default: ./images)
+  --keep-images N    Number of originals to retain (default: 100)
+  --no-archive       Don't archive original downloads (same as --keep-images 0)
 
 Schedule options (schedule command):
   --interval DUR     Time between refreshes (default: 15m)
@@ -67,15 +74,21 @@ Environment:
   UNSPLASH_ACCESS_KEY   Unsplash access key (required for --source unsplash)
   PIXABAY_API_KEY       Pixabay key (required for --source pixabay)
 
+API keys are resolved flag/env first, then saved config. Store them with:
+  frame-it config set unsplash-key <KEY>
+
 Examples:
   frame-it discover
   frame-it pair
   frame-it upload ./photos/*.jpg
   frame-it --host 192.168.1.50 list
+  frame-it config set unsplash-key abc123
+  frame-it config list
   frame-it wallpaper nature
   frame-it wallpaper --source unsplash mountains
   frame-it wallpaper --source pixabay --download-only --save ./art.jpg
   frame-it wallpaper --source wallhaven --id 94x38z
+  frame-it wallpaper --images-dir ~/Pictures/frame --keep-images 200 nature
   frame-it schedule mountains
   frame-it schedule --interval 15m --start 7:00 --end 21:00 nature
 `
@@ -122,6 +135,10 @@ func run() int {
 
 	if cmd == "schedule" {
 		return runSchedule(ctx, flags, args, log)
+	}
+
+	if cmd == "config" {
+		return runConfig(flags, args, log)
 	}
 
 	host, err := resolveHost(ctx, flags, log)
@@ -222,6 +239,60 @@ func run() int {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		fmt.Print(usage)
+		return 1
+	}
+}
+
+func runConfig(flags cliFlags, args []string, log *userlog.Logger) int {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	switch sub {
+	case "", "list":
+		cfg, err := config.Load(flags.tokenDir)
+		if err != nil {
+			log.Error(fmt.Sprintf("Could not read config: %v", err))
+			return 1
+		}
+		log.Step(fmt.Sprintf("Config at %s", config.Path(flags.tokenDir)))
+		for _, kv := range cfg.Display() {
+			value := kv.Value
+			if value == "" {
+				value = "(unset)"
+			}
+			log.Note(fmt.Sprintf("%-14s %s", kv.Key, value))
+		}
+		return 0
+
+	case "get":
+		if len(args) != 2 {
+			log.Error("Usage: frame-it config get <key>")
+			return 1
+		}
+		value, err := config.Get(flags.tokenDir, args[1])
+		if err != nil {
+			log.Error(err.Error())
+			return 1
+		}
+		fmt.Println(value)
+		return 0
+
+	case "set":
+		if len(args) != 3 {
+			log.Error("Usage: frame-it config set <key> <value>")
+			return 1
+		}
+		if err := config.Set(flags.tokenDir, args[1], args[2]); err != nil {
+			log.Error(err.Error())
+			return 1
+		}
+		log.Step(fmt.Sprintf("Saved %s", args[1]))
+		return 0
+
+	default:
+		log.Error(fmt.Sprintf("Unknown config subcommand %q (use list, get, set)", sub))
 		return 1
 	}
 }
@@ -354,6 +425,8 @@ type cliFlags struct {
 	wallpaperSave   string
 	downloadOnly    bool
 	wallpaperReplace bool
+	imagesDir        string
+	keepImages       int
 	scheduleInterval string
 	scheduleStart    string
 	scheduleEnd      string
@@ -374,6 +447,8 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 		pixabayKey:    os.Getenv("PIXABAY_API_KEY"),
 		wallpaperSort:      "random",
 		wallpaperReplace:   true,
+		keepImages:         -1, // -1 = unset; resolved from config or default
+
 		scheduleInterval:   "15m",
 		scheduleStart:      "7:00",
 		scheduleEnd:        "21:00",
@@ -458,6 +533,24 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.downloadOnly = true
 		case "--no-replace":
 			f.wallpaperReplace = false
+		case "--images-dir":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--images-dir requires a value")
+			}
+			i++
+			f.imagesDir = args[i]
+		case "--keep-images":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--keep-images requires a value")
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 0 {
+				return f, nil, fmt.Errorf("--keep-images must be a non-negative integer")
+			}
+			f.keepImages = n
+		case "--no-archive":
+			f.keepImages = 0
 		case "--interval":
 			if i+1 >= len(args) {
 				return f, nil, fmt.Errorf("--interval requires a value")
@@ -607,7 +700,7 @@ func runDiscover(ctx context.Context, flags cliFlags, log *userlog.Logger) int {
 func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userlog.Logger) int {
 	query := strings.TrimSpace(strings.Join(args, " "))
 
-	source, err := wallpaper.ResolveSource(flags.wallpaperSource)
+	source, err := wallpaper.ResolveSource(flags.wallpaperSource, hasUnsplashKey(flags))
 	if err != nil {
 		log.Error(err.Error())
 		return 1
@@ -659,6 +752,8 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 		log.Note("Saved to " + destPath)
 	}
 
+	archiveDownload(flags, img, destPath, log)
+
 	if flags.downloadOnly {
 		log.Step("Download complete")
 		return 0
@@ -693,6 +788,18 @@ func wallpaperOptions(flags cliFlags, source wallpaper.Source, query string) wal
 		UnsplashKey:  flags.unsplashKey,
 		PixabayKey:   flags.pixabayKey,
 	}
+	// Fall back to saved config keys when no flag/env value is present.
+	if cfg, err := config.Load(flags.tokenDir); err == nil {
+		if opts.WallhavenKey == "" {
+			opts.WallhavenKey = cfg.WallhavenKey
+		}
+		if opts.UnsplashKey == "" {
+			opts.UnsplashKey = cfg.UnsplashKey
+		}
+		if opts.PixabayKey == "" {
+			opts.PixabayKey = cfg.PixabayKey
+		}
+	}
 	if flags.apiKey != "" {
 		switch source {
 		case wallpaper.SourceUnsplash:
@@ -704,4 +811,58 @@ func wallpaperOptions(flags cliFlags, source wallpaper.Source, query string) wal
 		}
 	}
 	return opts
+}
+
+// hasUnsplashKey reports whether an Unsplash key is available from the flag/env
+// value or saved config, used to pick the default wallpaper source.
+func hasUnsplashKey(flags cliFlags) bool {
+	if strings.TrimSpace(flags.unsplashKey) != "" {
+		return true
+	}
+	if cfg, err := config.Load(flags.tokenDir); err == nil {
+		return strings.TrimSpace(cfg.UnsplashKey) != ""
+	}
+	return false
+}
+
+// archiveDownload copies the freshly downloaded (pre-resize, pre-overlay) image
+// into the images archive and prunes it to the retention limit. Failures are
+// logged as warnings and never abort the refresh.
+func archiveDownload(flags cliFlags, img wallpaper.Image, srcPath string, log *userlog.Logger) {
+	dir, keep := resolveArchive(flags)
+	if keep <= 0 {
+		return
+	}
+	filename := archive.Filename(time.Now(), img.Source, img.ID, img.Ext())
+	saved, err := archive.Store(dir, filename, srcPath, keep)
+	if err != nil {
+		log.Warn(fmt.Sprintf("Could not archive image: %v", err))
+		return
+	}
+	if saved != "" {
+		log.Note(fmt.Sprintf("Archived original to %s (keeping %d)", saved, keep))
+	}
+}
+
+// resolveArchive picks the archive directory and retention count using the
+// precedence flag > config > built-in default.
+func resolveArchive(flags cliFlags) (dir string, keep int) {
+	cfg, _ := config.Load(flags.tokenDir)
+
+	dir = archive.DefaultDir
+	if cfg.ImagesDir != "" {
+		dir = cfg.ImagesDir
+	}
+	if flags.imagesDir != "" {
+		dir = flags.imagesDir
+	}
+
+	keep = archive.DefaultKeep
+	if cfg.KeepImages != nil {
+		keep = *cfg.KeepImages
+	}
+	if flags.keepImages >= 0 {
+		keep = flags.keepImages
+	}
+	return dir, keep
 }
