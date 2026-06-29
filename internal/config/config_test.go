@@ -139,3 +139,48 @@ func TestSetWallpaperSlot(t *testing.T) {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 }
+
+func TestSetGetBoolKeys(t *testing.T) {
+	dir := t.TempDir()
+
+	// Unset by default.
+	if v, _ := Get(dir, "show-date"); v != "" {
+		t.Fatalf("show-date default = %q, want empty", v)
+	}
+
+	if err := Set(dir, "show-date", "false"); err != nil {
+		t.Fatalf("Set show-date: %v", err)
+	}
+	if err := Set(dir, "show-title", "true"); err != nil {
+		t.Fatalf("Set show-title: %v", err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ShowDate == nil || *cfg.ShowDate != false {
+		t.Fatalf("ShowDate = %v, want pointer to false", cfg.ShowDate)
+	}
+	if cfg.ShowTitle == nil || *cfg.ShowTitle != true {
+		t.Fatalf("ShowTitle = %v, want pointer to true", cfg.ShowTitle)
+	}
+
+	if v, _ := Get(dir, "show-date"); v != "false" {
+		t.Fatalf("Get show-date = %q, want false", v)
+	}
+
+	// Invalid value is rejected.
+	if err := Set(dir, "show-date", "maybe"); err == nil {
+		t.Fatal("expected error for invalid bool")
+	}
+
+	// Empty value clears the override.
+	if err := Set(dir, "show-date", ""); err != nil {
+		t.Fatalf("clear show-date: %v", err)
+	}
+	cfg, _ = Load(dir)
+	if cfg.ShowDate != nil {
+		t.Fatalf("ShowDate after clear = %v, want nil", cfg.ShowDate)
+	}
+}

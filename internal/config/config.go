@@ -30,6 +30,12 @@ type Config struct {
 	// KeepImages overrides how many archived images to retain (0 disables archiving).
 	ImagesDir  string `json:"images_dir,omitempty"`
 	KeepImages *int   `json:"keep_images,omitempty"`
+
+	// ShowDate and ShowTitle override the date stamp and caption overlays.
+	// Nil means unset (default on); the --date/--no-date and --title/--no-title
+	// flags take precedence over these.
+	ShowDate  *bool `json:"show_date,omitempty"`
+	ShowTitle *bool `json:"show_title,omitempty"`
 }
 
 // Wallpaper slot labels stored in config (logical names; TV assigns its own content IDs).
@@ -169,6 +175,8 @@ var SettableKeys = []string{
 	"pixabay-key",
 	"images-dir",
 	"keep-images",
+	"show-date",
+	"show-title",
 }
 
 // Set updates a single config field by key and saves it. An empty value clears
@@ -199,6 +207,18 @@ func Set(tokenDir, key, value string) error {
 			return fmt.Errorf("keep-images must be a non-negative integer, got %q", value)
 		}
 		cfg.KeepImages = &n
+	case "show-date":
+		b, err := parseBool(value)
+		if err != nil {
+			return err
+		}
+		cfg.ShowDate = b
+	case "show-title":
+		b, err := parseBool(value)
+		if err != nil {
+			return err
+		}
+		cfg.ShowTitle = b
 	default:
 		return fmt.Errorf("unknown config key %q (valid: %s)", key, strings.Join(SettableKeys, ", "))
 	}
@@ -227,6 +247,10 @@ func Get(tokenDir, key string) (string, error) {
 			return "", nil
 		}
 		return strconv.Itoa(*cfg.KeepImages), nil
+	case "show-date":
+		return boolString(cfg.ShowDate), nil
+	case "show-title":
+		return boolString(cfg.ShowTitle), nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (valid: %s)", key, strings.Join(SettableKeys, ", "))
 	}
@@ -254,7 +278,29 @@ func (c Config) Display() []KeyValue {
 		{"pixabay-key", mask(c.PixabayKey)},
 		{"images-dir", c.ImagesDir},
 		{"keep-images", keep},
+		{"show-date", boolString(c.ShowDate)},
+		{"show-title", boolString(c.ShowTitle)},
 	}
+}
+
+// parseBool reads a true/false config value into a *bool.
+func parseBool(value string) (*bool, error) {
+	if value == "" {
+		return nil, nil
+	}
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		return nil, fmt.Errorf("expected true or false, got %q", value)
+	}
+	return &b, nil
+}
+
+// boolString renders a *bool for display/get; nil becomes "".
+func boolString(b *bool) string {
+	if b == nil {
+		return ""
+	}
+	return strconv.FormatBool(*b)
 }
 
 // KeyValue is a single displayed config entry.

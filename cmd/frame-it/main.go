@@ -42,8 +42,9 @@ Options:
   --no-show          Upload without switching the displayed image
   --force            Switch to Art Mode even if the TV is showing a program
                      (default: leave a running program uninterrupted)
-  --no-date          Skip date stamp on uploaded images
-  --no-title         Skip the caption/title overlay (photo description + credit)
+  --date, --no-date  Draw or skip the date stamp (default on; config: show-date)
+  --title, --no-title  Draw or skip the caption/title overlay, i.e. the photo
+                     description + credit (default on; config: show-title)
   --mdns-only        Discover using mDNS only (no SSDP)
   --ssdp-only        Discover using SSDP only (no mDNS)
   -v                 Verbose logging
@@ -172,7 +173,8 @@ func run() int {
 			log.Error("Upload needs at least one image path")
 			return 1
 		}
-		return uploadImages(ctx, client, args, flags.show, flags.force, flags.stampDate, log)
+		stampDate, _ := resolveOverlays(flags)
+		return uploadImages(ctx, client, args, flags.show, flags.force, stampDate, log)
 
 	case "list":
 		if err := client.Connect(ctx); err != nil {
@@ -412,8 +414,8 @@ type cliFlags struct {
 	matte          string
 	show           bool
 	force          bool
-	stampDate      bool
-	caption        bool
+	stampDate      *bool // nil = unset; resolved from config or default (on)
+	caption        *bool // nil = unset; resolved from config or default (on)
 	verbose        bool
 	mdnsOnly       bool
 	ssdpOnly       bool
@@ -443,8 +445,6 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 		name:          "frame-it",
 		matte:         "none",
 		show:             true,
-		stampDate:        true,
-		caption:          true,
 		wallhavenKey:     os.Getenv("WALLHAVEN_API_KEY"),
 		unsplashKey:   os.Getenv("UNSPLASH_ACCESS_KEY"),
 		pixabayKey:    os.Getenv("PIXABAY_API_KEY"),
@@ -494,10 +494,14 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.show = false
 		case "--force":
 			f.force = true
+		case "--date":
+			f.stampDate = boolPtr(true)
 		case "--no-date":
-			f.stampDate = false
+			f.stampDate = boolPtr(false)
+		case "--title", "--caption":
+			f.caption = boolPtr(true)
 		case "--no-title", "--no-caption":
-			f.caption = false
+			f.caption = boolPtr(false)
 		case "-v", "--verbose":
 			f.verbose = true
 		case "--mdns-only":
@@ -780,11 +784,12 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 		Logger:        log.Slog(),
 	})
 
+	stampDate, showTitle := resolveOverlays(flags)
 	caption := ""
-	if flags.caption {
+	if showTitle {
 		caption = img.Caption()
 	}
-	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.force, flags.stampDate, caption, log, flags.tokenDir, flags.wallpaperReplace)
+	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.force, stampDate, caption, log, flags.tokenDir, flags.wallpaperReplace)
 }
 
 func wallpaperOptions(flags cliFlags, source wallpaper.Source, query string) wallpaper.Options {
@@ -851,6 +856,25 @@ func archiveDownload(flags cliFlags, img wallpaper.Image, srcPath string, log *u
 	if saved != "" {
 		log.Note(fmt.Sprintf("Archived original to %s (keeping %d)", saved, keep))
 	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// resolveOverlays decides whether to draw the date stamp and caption/title
+// overlays using the precedence flag > config > default (both on).
+func resolveOverlays(flags cliFlags) (stampDate, showTitle bool) {
+	cfg, _ := config.Load(flags.tokenDir)
+	pick := func(flag, cfgVal *bool) bool {
+		switch {
+		case flag != nil:
+			return *flag
+		case cfgVal != nil:
+			return *cfgVal
+		default:
+			return true
+		}
+	}
+	return pick(flags.stampDate, cfg.ShowDate), pick(flags.caption, cfg.ShowTitle)
 }
 
 // resolveArchive picks the archive directory and retention count using the
