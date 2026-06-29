@@ -37,6 +37,8 @@ Options:
   --no-matte         Upload without a matte frame (same as --matte none)
   --show             After upload, display the image (default: true)
   --no-show          Upload without switching the displayed image
+  --force            Switch to Art Mode even if the TV is showing a program
+                     (default: leave a running program uninterrupted)
   --no-date          Skip date stamp on uploaded images
   --mdns-only        Discover using mDNS only (no SSDP)
   --ssdp-only        Discover using SSDP only (no mDNS)
@@ -152,7 +154,7 @@ func run() int {
 			log.Error("Upload needs at least one image path")
 			return 1
 		}
-		return uploadImages(ctx, client, args, flags.show, flags.stampDate, log)
+		return uploadImages(ctx, client, args, flags.show, flags.force, flags.stampDate, log)
 
 	case "list":
 		if err := client.Connect(ctx); err != nil {
@@ -187,11 +189,16 @@ func run() int {
 		}
 		defer func() { _ = client.Close() }()
 
-		if err := client.SelectImage(ctx, args[0]); err != nil {
+		switched, err := client.ShowImage(ctx, args[0], flags.force)
+		if err != nil {
 			log.Error(fmt.Sprintf("Could not switch image: %v", err))
 			return 1
 		}
-		log.Step("Now showing on the TV")
+		if switched {
+			log.Step("Now showing on the TV")
+		} else {
+			log.Step("TV is showing a program — set as the next Art Mode image (use --force to switch now)")
+		}
 		return 0
 
 	case "delete":
@@ -219,11 +226,11 @@ func run() int {
 	}
 }
 
-func uploadImages(ctx context.Context, client *samsung.Client, paths []string, show, stampDate bool, log *userlog.Logger) int {
-	return uploadImagesWithReplace(ctx, client, paths, show, stampDate, "", log, "", false)
+func uploadImages(ctx context.Context, client *samsung.Client, paths []string, show, force, stampDate bool, log *userlog.Logger) int {
+	return uploadImagesWithReplace(ctx, client, paths, show, force, stampDate, "", log, "", false)
 }
 
-func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths []string, show, stampDate bool, caption string, log *userlog.Logger, tokenDir string, replacePrevious bool) int {
+func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths []string, show, force, stampDate bool, caption string, log *userlog.Logger, tokenDir string, replacePrevious bool) int {
 	if err := client.Connect(ctx); err != nil {
 		log.Error(fmt.Sprintf("Could not connect: %v", err))
 		return 1
@@ -294,13 +301,17 @@ func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths 
 	}
 
 	if show && lastID != "" {
-		if err := client.SelectImage(ctx, lastID); err != nil {
+		switched, err := client.ShowImage(ctx, lastID, force)
+		if err != nil {
 			log.Error(fmt.Sprintf("Could not show image: %v", err))
 			return 1
 		}
-		if wallpaperSlot != 0 {
+		switch {
+		case !switched:
+			log.Step("TV is showing a program — set as the next Art Mode image (use --force to switch now)")
+		case wallpaperSlot != 0:
 			log.Step(fmt.Sprintf("Now showing %s on the TV", config.WallpaperSlotLabel(wallpaperSlot)))
-		} else {
+		default:
 			log.Step("Now showing on the TV")
 		}
 	}
@@ -328,6 +339,7 @@ type cliFlags struct {
 	name           string
 	matte          string
 	show           bool
+	force          bool
 	stampDate      bool
 	verbose        bool
 	mdnsOnly       bool
@@ -402,6 +414,8 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.show = true
 		case "--no-show":
 			f.show = false
+		case "--force":
+			f.force = true
 		case "--no-date":
 			f.stampDate = false
 		case "-v", "--verbose":
@@ -666,7 +680,7 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 		Logger:        log.Slog(),
 	})
 
-	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.stampDate, img.Caption(), log, flags.tokenDir, flags.wallpaperReplace)
+	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.force, flags.stampDate, img.Caption(), log, flags.tokenDir, flags.wallpaperReplace)
 }
 
 func wallpaperOptions(flags cliFlags, source wallpaper.Source, query string) wallpaper.Options {
