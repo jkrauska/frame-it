@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // Logger prints short progress lines for humans, not structured slog fields.
@@ -48,7 +49,8 @@ func (l *Logger) Error(msg string) {
 }
 
 func (l *Logger) write(prefix, msg string) {
-	fmt.Fprintf(l.w, "%s%s\n", prefix, msg)
+	ts := time.Now().Format("2006-01-02 15:04:05")
+	fmt.Fprintf(l.w, "%s %s%s\n", ts, prefix, msg)
 }
 
 // Slog returns a slog.Logger that writes through this human-friendly handler.
