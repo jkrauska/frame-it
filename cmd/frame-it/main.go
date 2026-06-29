@@ -43,6 +43,7 @@ Options:
   --force            Switch to Art Mode even if the TV is showing a program
                      (default: leave a running program uninterrupted)
   --no-date          Skip date stamp on uploaded images
+  --no-title         Skip the caption/title overlay (photo description + credit)
   --mdns-only        Discover using mDNS only (no SSDP)
   --ssdp-only        Discover using SSDP only (no mDNS)
   -v                 Verbose logging
@@ -412,6 +413,7 @@ type cliFlags struct {
 	show           bool
 	force          bool
 	stampDate      bool
+	caption        bool
 	verbose        bool
 	mdnsOnly       bool
 	ssdpOnly       bool
@@ -442,6 +444,7 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 		matte:         "none",
 		show:             true,
 		stampDate:        true,
+		caption:          true,
 		wallhavenKey:     os.Getenv("WALLHAVEN_API_KEY"),
 		unsplashKey:   os.Getenv("UNSPLASH_ACCESS_KEY"),
 		pixabayKey:    os.Getenv("PIXABAY_API_KEY"),
@@ -493,6 +496,8 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.force = true
 		case "--no-date":
 			f.stampDate = false
+		case "--no-title", "--no-caption":
+			f.caption = false
 		case "-v", "--verbose":
 			f.verbose = true
 		case "--mdns-only":
@@ -775,7 +780,11 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 		Logger:        log.Slog(),
 	})
 
-	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.force, flags.stampDate, img.Caption(), log, flags.tokenDir, flags.wallpaperReplace)
+	caption := ""
+	if flags.caption {
+		caption = img.Caption()
+	}
+	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.force, flags.stampDate, caption, log, flags.tokenDir, flags.wallpaperReplace)
 }
 
 func wallpaperOptions(flags cliFlags, source wallpaper.Source, query string) wallpaper.Options {
