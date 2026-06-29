@@ -192,19 +192,64 @@ func (c *Client) DeleteImages(ctx context.Context, ids []string) error {
 	return err
 }
 
-// SelectImage displays the artwork with the given content ID.
-func (c *Client) SelectImage(ctx context.Context, contentID string) error {
+// SelectImage selects the artwork with the given content ID. When show is true
+// the TV switches to display it immediately, which forces the panel into Art
+// Mode. When show is false the artwork becomes the selected piece without
+// changing what is currently on screen.
+func (c *Client) SelectImage(ctx context.Context, contentID string, show bool) error {
 	reqID := newRequestID()
 	req := map[string]any{
 		"request":    "select_image",
 		"id":         reqID,
 		"request_id": reqID,
 		"content_id": contentID,
-		"show":       true,
+		"show":       show,
 	}
 
 	_, _, err := c.sendArtRequest(ctx, req)
 	return err
+}
+
+// ArtModeOn reports whether the TV is currently in Art Mode (showing artwork).
+// It returns false when the TV is showing a regular program (live TV, an app,
+// HDMI) or is in standby.
+func (c *Client) ArtModeOn(ctx context.Context) (bool, error) {
+	id := newRequestID()
+	req := map[string]any{
+		"request":    "get_artmode_status",
+		"id":         id,
+		"request_id": id,
+	}
+
+	resp, _, err := c.sendArtRequest(ctx, req)
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(resp.Value, "on"), nil
+}
+
+// ShowImage displays the given artwork, but avoids interrupting a program the
+// user is watching. If the TV is already in Art Mode (or force is true) it
+// switches the display to contentID. Otherwise it selects the artwork without
+// changing what is on screen, so the new image appears the next time Art Mode
+// is entered. It reports whether the visible display was switched.
+func (c *Client) ShowImage(ctx context.Context, contentID string, force bool) (switched bool, err error) {
+	show := true
+	if !force {
+		on, statusErr := c.ArtModeOn(ctx)
+		if statusErr != nil {
+			// Can't tell what the TV is doing — stay safe and don't interrupt.
+			c.log.Warn("Could not read Art Mode status; setting image without switching the display", "error", statusErr)
+			show = false
+		} else {
+			show = on
+		}
+	}
+
+	if err := c.SelectImage(ctx, contentID, show); err != nil {
+		return false, err
+	}
+	return show, nil
 }
 
 // Upload sends an image file to the TV and returns the assigned content ID.
