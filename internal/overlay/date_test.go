@@ -14,11 +14,19 @@ func TestFormatDate(t *testing.T) {
 	t.Parallel()
 
 	loc := time.UTC
-	when := time.Date(2026, 6, 26, 12, 0, 0, 0, loc)
-	got := FormatDate(when, loc)
-	want := "Friday, June 26th"
-	if got != want {
-		t.Fatalf("FormatDate() = %q, want %q", got, want)
+	tests := []struct {
+		when time.Time
+		want string
+	}{
+		{time.Date(2026, 6, 26, 12, 0, 0, 0, loc), "Friday, June 26th - 12pm"},
+		{time.Date(2026, 8, 24, 11, 45, 0, 0, loc), "Monday, August 24th - 11am"},
+		{time.Date(2026, 8, 24, 16, 5, 0, 0, loc), "Monday, August 24th - 4pm"},
+		{time.Date(2026, 8, 24, 0, 30, 0, 0, loc), "Monday, August 24th - 12am"},
+	}
+	for _, tc := range tests {
+		if got := FormatDate(tc.when, loc); got != tc.want {
+			t.Fatalf("FormatDate(%v) = %q, want %q", tc.when, got, tc.want)
+		}
 	}
 }
 

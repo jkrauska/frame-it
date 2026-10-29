@@ -14,7 +14,7 @@ type Tick func(ctx context.Context) error
 // Run executes tick on interval while inside the daily window; overnight it waits without changing the TV.
 func Run(ctx context.Context, opts Options, tick Tick, log *userlog.Logger) error {
 	if opts.Interval <= 0 {
-		opts.Interval = 15 * time.Minute
+		opts.Interval = time.Hour
 	}
 	if tick == nil {
 		return fmt.Errorf("schedule tick is nil")

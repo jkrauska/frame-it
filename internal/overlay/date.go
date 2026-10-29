@@ -31,14 +31,16 @@ type PrepareOptions struct {
 	Caption   string // bottom-left text, e.g. Unsplash photo description
 }
 
-// FormatDate renders a date like "Friday, June 26th".
+// FormatDate renders a date like "Friday, June 26th - 9am".
+// The hour is rounded down to give a rough sense of the last refresh.
 func FormatDate(when time.Time, loc *time.Location) string {
 	if loc == nil {
 		loc = time.Local
 	}
 	t := when.In(loc)
 	day := t.Day()
-	return fmt.Sprintf("%s, %s %d%s", t.Format("Monday"), t.Format("January"), day, ordinal(day))
+	return fmt.Sprintf("%s, %s %d%s - %s",
+		t.Format("Monday"), t.Format("January"), day, ordinal(day), t.Format("3pm"))
 }
 
 func ordinal(day int) string {

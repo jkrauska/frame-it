@@ -86,8 +86,9 @@ func copyFile(srcPath, destPath string) error {
 	return dest.Close()
 }
 
-// prune deletes the oldest files so that at most keep remain. Files are ordered
-// by name, which is chronological because Store names them with a timestamp prefix.
+// prune deletes the oldest images so that at most keep remain, along with their
+// metadata sidecars. Images are ordered by name, which is chronological because
+// Store names them with a timestamp prefix. Sidecars don't count toward keep.
 func prune(dir string, keep int) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -96,7 +97,7 @@ func prune(dir string, keep int) error {
 
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || IsMeta(e.Name()) {
 			continue
 		}
 		names = append(names, e.Name())
@@ -107,7 +108,11 @@ func prune(dir string, keep int) error {
 
 	sort.Strings(names) // oldest first
 	for _, name := range names[:len(names)-keep] {
-		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+		path := filepath.Join(dir, name)
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+		if err := os.Remove(MetaPath(path)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}

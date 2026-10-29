@@ -79,7 +79,8 @@ Get free API keys from [Unsplash Developers](https://unsplash.com/developers) an
 | `pair` | Save an auth token (accept TV prompt) |
 | `upload <files...>` | Upload JPG/PNG and display the last one |
 | `wallpaper [query]` | Fetch 4K wallpaper art and upload to TV |
-| `schedule [query]` | Refresh wallpaper every 15m between 7am and 9pm (hold overnight) |
+| `schedule [query]` | Refresh wallpaper every hour between 7am and 9pm (hold overnight) |
+| `gallery` | Browse recent wallpapers in a local web gallery |
 | `list` | List uploaded images on the TV |
 | `select <content-id>` | Show an existing image |
 | `delete <content-id...>` | Remove images from the TV |
@@ -122,15 +123,15 @@ All sources target 4K landscape images suitable for Frame TVs. Unsplash and Pixa
 
 Wallpaper mode keeps two logical slots (`frame-it-image1` and `frame-it-image2`) and alternates between them. The TV assigns a new content ID (e.g. `MY_F0139`) on every upload — that counter always increments — but only two wallpaper images are kept on the TV at a time.
 
-All uploaded images are resized to 3840×2160 (center-cropped cover). By default a small date stamp is added in the bottom-right corner (e.g. `Friday, June 26th`), white on dark backgrounds and dark grey on light ones. Pass `--no-date` to skip the stamp while still resizing. Unsplash wallpapers show the photo description and photographer in the bottom-left (e.g. `green grass field during sunset · Robert Lukeman`); long descriptions collapse to `...` but keep the credit.
+All uploaded images are resized to 3840×2160 (center-cropped cover). By default a small date stamp is added in the bottom-right corner (e.g. `Friday, June 26th - 9am`), white on dark backgrounds and dark grey on light ones. Pass `--no-date` to skip the stamp while still resizing. Unsplash wallpapers show the photo description and photographer in the bottom-left (e.g. `green grass field during sunset · Robert Lukeman`); long descriptions collapse to `...` but keep the credit.
 
 ### Scheduled refresh
 
-Run a long-lived scheduler that refreshes wallpaper every 15 minutes from 7:00 to 21:00 and holds the last image overnight:
+Run a long-lived scheduler that refreshes wallpaper every hour from 7:00 to 21:00 and holds the last image overnight:
 
 ```bash
 frame-it schedule mountains
-frame-it schedule --interval 15m --start 7:00 --end 21:00 --source unsplash nature
+frame-it schedule --interval 30m --start 7:00 --end 21:00 --source unsplash nature
 ```
 
 Press Ctrl+C to stop. All `wallpaper` flags (`--source`, `--matte`, etc.) work with `schedule`.
@@ -163,6 +164,29 @@ Press Ctrl+C to stop. All `wallpaper` flags (`--source`, `--matte`, etc.) work w
 ```
 
 Adjust the `frame-it` path and query as needed. For cron-style one-shot runs use `frame-it schedule --once mountains`.
+
+### Local gallery
+
+See what's been on the TV lately. `frame-it gallery` serves a Lightroom-style contact sheet of the most recent archived images, each tile showing the overlay text (caption bottom-left, date stamp bottom-right) it was displayed with, plus source, photographer, query, and file details underneath. Click a tile for a full-size view; Esc closes it.
+
+```bash
+frame-it gallery --open              # http://127.0.0.1:8787
+frame-it gallery --limit 10 --port 9000
+frame-it gallery --bind 127.0.0.1    # this machine only
+frame-it gallery --images-dir ~/Pictures/frame
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `8787` | Port to serve on |
+| `--bind` | `0.0.0.0` | Interface to listen on; `127.0.0.1` restricts it to this machine |
+| `--limit` | `20` | Number of recent images to show |
+| `--images-dir` | `./images` | Archive directory to browse |
+| `--open` | | Open the gallery in your browser |
+
+By default the gallery listens on `0.0.0.0`, so you can open it on a phone or laptop — the startup log prints the LAN URL. There is no authentication, so anyone who can reach the host can browse the archive; use `--bind 127.0.0.1` to keep it local. The server is read-only and rebuilds its listing on every page load — leave it running next to `frame-it schedule` and reload to see new images. Thumbnails are downscaled in memory (originals are never modified) and pre-rendered at startup.
+
+Each archived image gets a `.json` sidecar recording what was drawn on it (caption, date stamp, credit, description, query, source page). Images archived before this existed still appear, tagged `no metadata`, with source and ID read from the filename.
 
 ## Environment
 

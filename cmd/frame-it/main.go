@@ -30,6 +30,7 @@ Usage:
   frame-it delete <content-id>...  Delete image(s) from the TV
   frame-it wallpaper [query]       Fetch wallpaper art and upload to TV
   frame-it schedule [query]        Refresh wallpaper on a daily interval (7am–9pm default)
+  frame-it gallery                 Browse recent wallpapers in a local web gallery
   frame-it config <list|get|set>   View or change saved settings (host, API keys, …)
 
 Options:
@@ -64,12 +65,20 @@ Wallpaper options (wallpaper command):
   --no-archive       Don't archive original downloads (same as --keep-images 0)
 
 Schedule options (schedule command):
-  --interval DUR     Time between refreshes (default: 15m)
+  --interval DUR     Time between refreshes (default: 1h)
   --start TIME       Daily start time (default: 7:00)
   --end TIME         Daily end time, exclusive (default: 21:00)
   --timezone NAME    IANA timezone (default: local)
   --once             Run one refresh if inside the window, then exit
   --no-run-on-start  Wait for the first interval before refreshing
+
+Gallery options (gallery command):
+  --port N           Port to serve on (default: 8787)
+  --bind ADDR        Interface to listen on (default: 0.0.0.0, i.e. the LAN;
+                     use 127.0.0.1 to keep it on this machine only)
+  --limit N          Number of recent images to show (default: 20)
+  --images-dir PATH  Archive directory to browse (default: ./images)
+  --open             Open the gallery in your browser
 
 Environment:
   WALLHAVEN_API_KEY     Wallhaven key (optional for SFW)
@@ -92,7 +101,10 @@ Examples:
   frame-it wallpaper --source wallhaven --id 94x38z
   frame-it wallpaper --images-dir ~/Pictures/frame --keep-images 200 nature
   frame-it schedule mountains
-  frame-it schedule --interval 15m --start 7:00 --end 21:00 nature
+  frame-it schedule --interval 30m --start 7:00 --end 21:00 nature
+  frame-it gallery --open
+  frame-it gallery --limit 10 --port 9000
+  frame-it gallery --bind 127.0.0.1
 `
 
 var errHelp = errors.New("help requested")
@@ -141,6 +153,10 @@ func run() int {
 
 	if cmd == "config" {
 		return runConfig(flags, args, log)
+	}
+
+	if cmd == "gallery" {
+		return runGallery(ctx, flags, log)
 	}
 
 	host, err := resolveHost(ctx, flags, log)
@@ -408,51 +424,55 @@ func uploadImagesWithReplace(ctx context.Context, client *samsung.Client, paths 
 }
 
 type cliFlags struct {
-	host           string
-	tokenDir       string
-	name           string
-	matte          string
-	show           bool
-	force          bool
-	stampDate      *bool // nil = unset; resolved from config or default (on)
-	caption        *bool // nil = unset; resolved from config or default (on)
-	verbose        bool
-	mdnsOnly       bool
-	ssdpOnly       bool
-	wallhavenKey    string
-	unsplashKey     string
-	pixabayKey      string
-	apiKey          string
-	wallpaperSource string
-	wallpaperID     string
-	wallpaperSort   string
-	wallpaperSave   string
-	downloadOnly    bool
-	wallpaperReplace bool
-	imagesDir        string
-	keepImages       int
-	scheduleInterval string
-	scheduleStart    string
-	scheduleEnd      string
-	scheduleTZ       string
-	scheduleOnce     bool
+	host               string
+	tokenDir           string
+	name               string
+	matte              string
+	show               bool
+	force              bool
+	stampDate          *bool // nil = unset; resolved from config or default (on)
+	caption            *bool // nil = unset; resolved from config or default (on)
+	verbose            bool
+	mdnsOnly           bool
+	ssdpOnly           bool
+	wallhavenKey       string
+	unsplashKey        string
+	pixabayKey         string
+	apiKey             string
+	wallpaperSource    string
+	wallpaperID        string
+	wallpaperSort      string
+	wallpaperSave      string
+	downloadOnly       bool
+	wallpaperReplace   bool
+	imagesDir          string
+	keepImages         int
+	scheduleInterval   string
+	scheduleStart      string
+	scheduleEnd        string
+	scheduleTZ         string
+	scheduleOnce       bool
 	scheduleRunOnStart bool
+	galleryBind        string
+	galleryPort        int
+	galleryLimit       int
+	galleryOpen        bool
 }
 
 func parseFlags(args []string) (cliFlags, []string, error) {
 	f := cliFlags{
-		tokenDir:      defaultTokenDir(),
-		name:          "frame-it",
-		matte:         "none",
+		tokenDir:         defaultTokenDir(),
+		name:             "frame-it",
+		matte:            "none",
 		show:             true,
 		wallhavenKey:     os.Getenv("WALLHAVEN_API_KEY"),
-		unsplashKey:   os.Getenv("UNSPLASH_ACCESS_KEY"),
-		pixabayKey:    os.Getenv("PIXABAY_API_KEY"),
-		wallpaperSort:      "random",
-		wallpaperReplace:   true,
-		keepImages:         -1, // -1 = unset; resolved from config or default
+		unsplashKey:      os.Getenv("UNSPLASH_ACCESS_KEY"),
+		pixabayKey:       os.Getenv("PIXABAY_API_KEY"),
+		wallpaperSort:    "random",
+		wallpaperReplace: true,
+		keepImages:       -1, // -1 = unset; resolved from config or default
 
-		scheduleInterval:   "15m",
+		scheduleInterval:   "1h",
 		scheduleStart:      "7:00",
 		scheduleEnd:        "21:00",
 		scheduleRunOnStart: true,
@@ -560,6 +580,36 @@ func parseFlags(args []string) (cliFlags, []string, error) {
 			f.keepImages = n
 		case "--no-archive":
 			f.keepImages = 0
+		case "--port":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--port requires a value")
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 1 || n > 65535 {
+				return f, nil, fmt.Errorf("--port must be a number between 1 and 65535")
+			}
+			f.galleryPort = n
+		case "--limit":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--limit requires a value")
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 1 {
+				return f, nil, fmt.Errorf("--limit must be a positive integer")
+			}
+			f.galleryLimit = n
+		case "--bind":
+			if i+1 >= len(args) {
+				return f, nil, fmt.Errorf("--bind requires a value")
+			}
+			i++
+			f.galleryBind = args[i]
+		case "--open":
+			f.galleryOpen = true
+		case "--no-open":
+			f.galleryOpen = false
 		case "--interval":
 			if i+1 >= len(args) {
 				return f, nil, fmt.Errorf("--interval requires a value")
@@ -761,7 +811,13 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 		log.Note("Saved to " + destPath)
 	}
 
-	archiveDownload(flags, img, destPath, log)
+	stampDate, showTitle := resolveOverlays(flags)
+	caption := ""
+	if showTitle {
+		caption = img.Caption()
+	}
+
+	archiveDownload(flags, img, destPath, query, caption, stampDate, log)
 
 	if flags.downloadOnly {
 		log.Step("Download complete")
@@ -784,11 +840,6 @@ func runWallpaper(ctx context.Context, flags cliFlags, args []string, log *userl
 		Logger:        log.Slog(),
 	})
 
-	stampDate, showTitle := resolveOverlays(flags)
-	caption := ""
-	if showTitle {
-		caption = img.Caption()
-	}
 	return uploadImagesWithReplace(ctx, client, []string{destPath}, flags.show, flags.force, stampDate, caption, log, flags.tokenDir, flags.wallpaperReplace)
 }
 
@@ -842,19 +893,40 @@ func hasUnsplashKey(flags cliFlags) bool {
 // archiveDownload copies the freshly downloaded (pre-resize, pre-overlay) image
 // into the images archive and prunes it to the retention limit. Failures are
 // logged as warnings and never abort the refresh.
-func archiveDownload(flags cliFlags, img wallpaper.Image, srcPath string, log *userlog.Logger) {
+func archiveDownload(flags cliFlags, img wallpaper.Image, srcPath, query, caption string, stampDate bool, log *userlog.Logger) {
 	dir, keep := resolveArchive(flags)
 	if keep <= 0 {
 		return
 	}
-	filename := archive.Filename(time.Now(), img.Source, img.ID, img.Ext())
+	now := time.Now()
+	filename := archive.Filename(now, img.Source, img.ID, img.Ext())
 	saved, err := archive.Store(dir, filename, srcPath, keep)
 	if err != nil {
 		log.Warn(fmt.Sprintf("Could not archive image: %v", err))
 		return
 	}
-	if saved != "" {
-		log.Note(fmt.Sprintf("Archived original to %s (keeping %d)", saved, keep))
+	if saved == "" {
+		return
+	}
+	log.Note(fmt.Sprintf("Archived original to %s (keeping %d)", saved, keep))
+
+	meta := archive.Meta{
+		File:        filename,
+		ArchivedAt:  now,
+		Source:      img.Source,
+		ID:          img.ID,
+		Query:       query,
+		PageURL:     img.PageURL,
+		Resolution:  img.Resolution,
+		Credit:      img.Credit,
+		Description: img.Description,
+		Caption:     caption,
+	}
+	if stampDate {
+		meta.DateStamp = overlay.FormatDate(now, time.Local)
+	}
+	if err := archive.WriteMeta(saved, meta); err != nil {
+		log.Warn(fmt.Sprintf("Could not save image metadata: %v", err))
 	}
 }
 

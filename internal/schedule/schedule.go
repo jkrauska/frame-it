@@ -136,7 +136,7 @@ func NextWindowStart(now time.Time, w Window) time.Time {
 // When inside the window it is min(now+interval, today's window end); otherwise NextWindowStart.
 func NextWake(now time.Time, w Window, interval time.Duration) time.Time {
 	if interval <= 0 {
-		interval = 15 * time.Minute
+		interval = time.Hour
 	}
 
 	loc := w.location()
