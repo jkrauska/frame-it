@@ -37,7 +37,11 @@ type artResponse struct {
 	ContentListRaw json.RawMessage `json:"content_list,omitempty"`
 	ContentID      string          `json:"content_id,omitempty"`
 	Value          string          `json:"value,omitempty"`
-	ConnInfoRaw    json.RawMessage `json:"conn_info,omitempty"`
+	// Art API 5.x reports artmode status in "status" rather than "value".
+	Status string `json:"status,omitempty"`
+	// api_version answers in "version"; some firmware uses "value".
+	Version     string          `json:"version,omitempty"`
+	ConnInfoRaw json.RawMessage `json:"conn_info,omitempty"`
 }
 
 func (a *artResponse) ContentList() string {

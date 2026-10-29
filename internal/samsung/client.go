@@ -1,6 +1,7 @@
 package samsung
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -122,20 +124,45 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// APIVersion returns the TV art API version (e.g. "0.97" on 2018–2019 models).
+// APIVersion returns the TV art API version (e.g. "0.97" on 2018 models,
+// "4.3.4.0" on 2022). Pre-2.0 firmware only answers "get_api_version", so both
+// request names are tried.
 func (c *Client) APIVersion(ctx context.Context) (string, error) {
-	id := newRequestID()
-	req := map[string]any{
-		"request":    "api_version",
-		"id":         id,
-		"request_id": id,
+	var lastErr error
+
+	for _, request := range []string{"api_version", "get_api_version"} {
+		id := newRequestID()
+		resp, _, err := c.sendArtRequest(ctx, map[string]any{
+			"request":    request,
+			"id":         id,
+			"request_id": id,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if version := cmp.Or(resp.Version, resp.Value); version != "" {
+			return version, nil
+		}
 	}
 
-	resp, _, err := c.sendArtRequest(ctx, req)
-	if err != nil {
-		return "", err
+	if lastErr != nil {
+		return "", lastErr
 	}
-	return resp.Value, nil
+	return "", fmt.Errorf("api_version: no version in response")
+}
+
+// isLegacyArtAPI reports whether the TV uses the pre-2.0 art API, as the 2017
+// (1.07) and 2018 (0.97) Frames do. Those models expect an upload as a single
+// binary WebSocket message instead of a D2D socket transfer. An unparseable
+// version selects the modern path.
+func isLegacyArtAPI(version string) bool {
+	major, _, _ := strings.Cut(version, ".")
+	n, err := strconv.Atoi(strings.TrimSpace(major))
+	if err != nil {
+		return false
+	}
+	return n < 2
 }
 
 // ListUploaded returns user-uploaded artwork (category MY-C0002 = My Photos).
@@ -225,7 +252,7 @@ func (c *Client) ArtModeOn(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.EqualFold(resp.Value, "on"), nil
+	return strings.EqualFold(cmp.Or(resp.Value, resp.Status), "on"), nil
 }
 
 // ShowImage displays the given artwork, but avoids interrupting a program the
@@ -265,8 +292,11 @@ func (c *Client) Upload(ctx context.Context, filePath string) (string, error) {
 	waitForAdded := c.registerImageAddedListener()
 
 	apiVersion, apiErr := c.APIVersion(ctx)
-	if apiErr == nil && apiVersion == "0.97" {
-		c.log.Debug("Using legacy upload method for this TV (API 0.97)")
+	switch {
+	case apiErr != nil:
+		c.log.Warn("Could not read the art API version; using the modern upload method", "error", apiErr)
+	case isLegacyArtAPI(apiVersion):
+		c.log.Debug("Using legacy upload method for this TV", "api_version", apiVersion)
 		return c.uploadBinary(ctx, filePath, fileType, matte, stat.Size(), waitForAdded)
 	}
 
@@ -452,16 +482,15 @@ func (c *Client) sendArtRequest(ctx context.Context, req map[string]any) (*artRe
 	return &resp, raw, nil
 }
 
+// fileTypeFromPath returns the canonical lowercase art-API file type ("jpg",
+// "png"). The D2D request and socket header both expect this form; only the
+// legacy single-message upload upper-cases it, via fileTypeHeader.
 func fileTypeFromPath(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".jpg", ".jpeg":
-		return "JPEG"
-	case ".png":
-		return "PNG"
-	default:
-		return strings.TrimPrefix(ext, ".")
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if ext == "jpeg" {
+		return "jpg"
 	}
+	return ext
 }
 
 func fileTypeHeader(fileType string) string {

@@ -13,7 +13,13 @@ import (
 	"time"
 )
 
-const d2dChunkSize = 64 * 1024
+const (
+	d2dChunkSize = 64 * 1024
+
+	// d2dSecuredConnectDelay gives the TV time to finish setting up a secured
+	// transfer socket before we connect to it.
+	d2dSecuredConnectDelay = time.Second
+)
 
 type d2dUpload struct {
 	info          connInfo
@@ -24,8 +30,16 @@ type d2dUpload struct {
 }
 
 func dialD2D(ctx context.Context, info connInfo, dialer *net.Dialer, skipTLSVerify bool) (net.Conn, error) {
-	addr := fmt.Sprintf("%s:%s", info.IP, info.Port)
+	addr := net.JoinHostPort(info.IP, info.Port.String())
 	if info.Secured {
+		// A 2022 Frame resets a secured transfer socket, abandoning the upload,
+		// if we connect as soon as it answers with conn_info.
+		select {
+		case <-time.After(d2dSecuredConnectDelay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+
 		tlsConf := &tls.Config{InsecureSkipVerify: skipTLSVerify} //nolint:gosec // Samsung self-signed cert
 		tlsDialer := &tls.Dialer{
 			NetDialer: dialer,
